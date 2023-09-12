@@ -1,20 +1,22 @@
 # esp32-rpi-ble-example
 
-* ESP32-C3(ベリフェラル)とRaspberry Pi4(セントラル)を使ったBLE送受信のサンプル
-* ベリフェラル側のボタンを押すとカウントアップされ、セントラル側にNotifyで通知される。
+* ESP32-C3(ベリフェラル)とRaspberry Pi4(セントラル)を使ったBLE送受信のサンプル。
+* ベリフェラルのLocalNameとServiceUUID, CharacteristicUUIDでマッチする。
+* ベリフェラル側のボタンを押すとカウントアップされ、セントラル側にNotifyで数値が通知される。
 * セントラル側はWriteでベリフェラル側に数値が送られる。0x00でなければLEDが点灯する。
+* 同一設定の複数のベリフェラルは試していない。
 
 ![photo](./resource/photo.jpg)
 
 # 環境
 
-## ESP32-C3(自作モジュール)
+## ベリフェラル(子機)
 
 [ソース](./esp32-c3)
 
-* ベリフェラル
-* ESP32-C3(RISC-V)を使用した自作モジュール
+* [ESP32-C3(RISC-V)](https://akizukidenshi.com/catalog/g/gM-17493/)を使った自作モジュール
 * Arduino(C++),Arduino-CLI
+* [Seeed Studio XIAO ESP32C3](https://akizukidenshi.com/catalog/g/gM-17454/)でもほとんど変更なく動作すると思う(未確認)
 
 回路図
 
@@ -22,11 +24,11 @@
 
 [PDF](./resource/schematics/board.pdf)
 
-## Raspberry Pi 4
+## セントラル(親機)
 
 [ソース](./central)
 
-* セントラル
+* Raspberry Pi 4(aarch64)
 * Raspberry Pi OS Lite(64Bit)
 * Golang, tinygo bluetooth
 * Linux専用
@@ -35,7 +37,7 @@ tinygo-bluetoothはクラスプラットフォームだが、macOSの場合はWr
 
 # TIPS
 
-* macOSでUUIDを生成する場合はuuidgenを使うとよい
+* macOSでUUIDを生成する場合は `uuidgen` を使うとよい
 
 ## Raspberry Pi OS上にarduino-cliを導入する
 
