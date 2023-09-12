@@ -55,3 +55,10 @@ tinygo-bluetoothはクラスプラットフォームだが、macOSの場合はWr
     EOS
 
     $ sudo apt install python3-serial
+
+## 参考URL
+
+* [arduino-esp32 ble examples](https://github.com/espressif/arduino-esp32/tree/master/libraries/BLE/examples)
+* [ESP32でBLEデバイスを作る](https://zenn.dev/luup/articles/iot-yamaguchi-20221204)
+* [go bluetooth](https://github.com/tinygo-org/bluetooth)
+
