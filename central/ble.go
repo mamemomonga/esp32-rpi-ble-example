@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -9,14 +10,11 @@ import (
 )
 
 type BLE struct {
-	adapter        *bluetooth.Adapter
-	deviceAddress  *bluetooth.Address
-	device         *bluetooth.Device
-	characteristic bluetooth.DeviceCharacteristic
-	targets        BLETargets
-	ledStatus      bool
-	connected      bool
-	ctx            context.Context
+	adapter     *bluetooth.Adapter
+	targets     BLETargets
+	connections []*BLEConnections
+	ledStatus   bool
+	ctx         context.Context
 }
 
 type BLETargets struct {
@@ -25,13 +23,20 @@ type BLETargets struct {
 	Characteristic bluetooth.UUID
 }
 
+type BLEConnections struct {
+	deviceAddress  *bluetooth.Address
+	device         *bluetooth.Device
+	characteristic bluetooth.DeviceCharacteristic
+	connected      bool
+	updateTime     time.Time
+}
+
 func NewBLE() (t *BLE) {
 	t = new(BLE)
 	t.adapter = bluetooth.DefaultAdapter
 	t.adapter.SetConnectHandler(t.connectHandler)
 	t.targets = BLETargets{}
 	t.ledStatus = false
-	t.connected = false
 	return t
 }
 
@@ -57,49 +62,150 @@ func (t *BLE) SetTargetUUIDCharacteristic(s string) (err error) {
 	return nil
 }
 
-func (t *BLE) connectHandler(device bluetooth.Address, connected bool) {
-	if connected {
-		log.Printf("[BLE] CONNECTED %s", device.String())
-		t.connected = true
-	} else {
-		log.Printf("[BLE] DISCONNECTED %s", device.String())
-		t.Stop()
+func (t *BLE) connectionShow() {
+	for _, c := range t.connections {
+		connected := "disconnected"
+		if c.connected {
+			connected = "connected"
+		}
+		fmt.Printf("[BLE]  Cstat %s %s %s\n",
+			c.deviceAddress.String(),
+			connected,
+			time.Since(c.updateTime).String(),
+		)
 	}
 }
 
-func (t *BLE) scan() (err error) {
-	ch := make(chan bool, 1)
+func (t *BLE) connectionConnect(addr bluetooth.Address) {
+	t.connections = append(t.connections, &BLEConnections{
+		deviceAddress: &addr,
+		updateTime:    time.Now(),
+		connected:     true,
+	})
+	t.connectionShow()
+}
 
-	time.Sleep(time.Second * 1)
-	log.Println("[BLE] scanning")
+func (t *BLE) connectionDisconnect(addr bluetooth.Address) {
+	for _, c := range t.connections {
+		if *c.deviceAddress == addr {
+			c.updateTime = time.Now()
+			c.connected = false
+		}
+		log.Printf("[BLE]  Cdisconnect %s %s",
+			c.deviceAddress.String(),
+			time.Since(c.updateTime).String(),
+		)
+	}
+	t.connectionShow()
+}
 
-	err = t.adapter.Scan(func(adapter *bluetooth.Adapter, device bluetooth.ScanResult) {
+func (t *BLE) connectionCleanup() {
+	for {
 		select {
 		case <-t.ctx.Done():
-			adapter.StopScan()
-			ch <- true
 			return
 		default:
 		}
-		//		log.Println("[BLE] ",
-		//			device.Address.String(),
-		//			device.RSSI,
-		//			device.LocalName(),
-		//		)
-		if (device.LocalName() == t.targets.LocalName) && (device.RSSI != 0) {
+
+		fmt.Print("+")
+
+		ncs := []*BLEConnections{}
+		for _, c := range t.connections {
+			if !c.connected {
+				// 切断から10秒していたらエントリ削除
+				if time.Since(c.updateTime).Seconds() > 10 {
+					log.Printf("[BLE] Cremove: %s", c.deviceAddress.String())
+					continue
+				}
+			}
+			ncs = append(ncs, c)
+		}
+		t.connections = ncs
+
+		time.Sleep(time.Second * 1)
+	}
+}
+
+func (t *BLE) connectHandler(addr bluetooth.Address, connected bool) {
+	if connected {
+		log.Printf("[BLE] CONNECTED %s", addr.String())
+		t.connectionConnect(addr)
+	} else {
+		log.Printf("[BLE] DISCONNECTED %s", addr.String())
+		t.connectionDisconnect(addr)
+		//		t.Stop()
+	}
+}
+
+func (t *BLE) scan() {
+	done := make(chan bool, 1)
+	err := t.adapter.Scan(func(adapter *bluetooth.Adapter, device bluetooth.ScanResult) {
+		select {
+		case <-t.ctx.Done():
 			adapter.StopScan()
-			t.deviceAddress = &device.Address
-			ch <- true
+			log.Print("SCAN STOP")
+			done <- true
+			return
+		default:
+		}
+		fmt.Print(".")
+
+		/*
+			log.Printf("[BLE]   %s %ddB %s",
+				device.Address.String(),
+				device.RSSI,
+				device.LocalName(),
+			)
+		*/
+
+		if (device.LocalName() == t.targets.LocalName) && (device.RSSI != 0) {
+			fmt.Print("!")
+
+			exists := false
+			for _, act := range t.connections {
+				if *act.deviceAddress == device.Address {
+					exists = true
+				}
+			}
+			fmt.Print("1")
+			if !exists {
+				fmt.Print("#")
+				fmt.Println()
+				log.Printf("[BLE] %s %ddB %s",
+					device.Address.String(),
+					device.RSSI,
+					device.LocalName(),
+				)
+				t.connect(&device.Address)
+			}
 		}
 	})
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
-	<-ch
-	return nil
+	<-done
+}
+func (t *BLE) connect(deviceAddress *bluetooth.Address) {
+	log.Printf("[BLE] CONNECTING: %s", deviceAddress.String())
+
+	// connect
+	device, err := t.adapter.Connect(
+		*deviceAddress,
+		bluetooth.ConnectionParams{
+			ConnectionTimeout: bluetooth.NewDuration(time.Second * 5),
+		},
+	)
+	if err != nil {
+		t.connectionDisconnect(*deviceAddress)
+		log.Println(err)
+		return
+	}
+
+	_ = device
 
 }
 
+/*
 func (t *BLE) discover() (found bool, err error) {
 	log.Println("[BLE] connecting")
 
@@ -155,3 +261,4 @@ func (t *BLE) Stop() {
 		log.Println("[BLE] disconnect")
 	}
 }
+*/

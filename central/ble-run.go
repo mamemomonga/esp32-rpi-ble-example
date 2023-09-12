@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"time"
 )
 
 func (t *BLE) Run(ctx context.Context) (err error) {
@@ -12,57 +11,76 @@ func (t *BLE) Run(ctx context.Context) (err error) {
 	if err != nil {
 		return
 	}
+	go t.connectionCleanup()
+
 	done := make(chan bool, 1)
 	go func() {
 		defer func() {
-			t.Stop()
+			// t.Stop()
 			done <- true
 		}()
 		for {
-			found := false
-			for !found {
-				// scan
-				err := t.scan()
-				if err != nil {
-					log.Fatal(err)
-				}
-				select {
-				case <-t.ctx.Done():
-					return
-				default:
-				}
-
-				// discover
-				found, err = t.discover()
-				if err != nil {
-					log.Fatal(err)
-				}
-				select {
-				case <-t.ctx.Done():
-					return
-				default:
-				}
+			t.scan()
+			if err != nil {
+				log.Fatal(err)
 			}
-			if found {
-				// notification
-				err = t.characteristic.EnableNotifications(t.notify)
-				if err != nil {
-					log.Fatal(err)
-				}
+			select {
+			case <-t.ctx.Done():
+				return
+			default:
+			}
+		}
+	}()
+	<-done
+	close(done)
+	return nil
+}
 
-				// running
-				for t.connected {
+/*
+				found := false
+				for !found {
+					// scan
+					err := t.scan()
+					if err != nil {
+						log.Fatal(err)
+					}
 					select {
 					case <-t.ctx.Done():
 						return
 					default:
 					}
-					t.blink()
-					time.Sleep(time.Millisecond * 500)
+
+					// discover
+					found, err = t.discover()
+					if err != nil {
+						log.Fatal(err)
+					}
+					select {
+					case <-t.ctx.Done():
+						return
+					default:
+					}
+				}
+				if found {
+					// notification
+					err = t.characteristic.EnableNotifications(t.notify)
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					// running
+					for t.connected {
+						select {
+						case <-t.ctx.Done():
+							return
+						default:
+						}
+						t.blink()
+						time.Sleep(time.Millisecond * 500)
+					}
 				}
 			}
-		}
-	}()
+		}()
 
 	<-done
 	close(done)
@@ -87,3 +105,4 @@ func (t *BLE) blink() {
 	log.Printf("[BLE] Write: %0X", buf)
 	t.ledStatus = !t.ledStatus
 }
+*/

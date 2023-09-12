@@ -2,7 +2,10 @@ module github.com/mamemomonga/esp32-rpi-ble-example/central
 
 go 1.20
 
-require tinygo.org/x/bluetooth v0.7.0
+require (
+	github.com/davecgh/go-spew v1.1.1
+	tinygo.org/x/bluetooth v0.7.0
+)
 
 require (
 	github.com/fatih/structs v1.1.0 // indirect
