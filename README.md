@@ -18,7 +18,7 @@
 
 回路図
 
-![schematics](./resource/schematics/board.svg)
+![schematics](./resource/schematics/board.png)
 
 [PDF](./resource/schematics/board.pdf)
 
