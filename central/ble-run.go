@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"log"
+	"sync"
+	"time"
+
+	"tinygo.org/x/bluetooth"
 )
 
 func (t *BLE) Run(ctx context.Context) (err error) {
@@ -11,84 +15,36 @@ func (t *BLE) Run(ctx context.Context) (err error) {
 	if err != nil {
 		return
 	}
-	go t.connectionCleanup()
 
-	done := make(chan bool, 1)
+	var wg sync.WaitGroup
+
+	go t.scanStart()
+
+	wg.Add(1)
+	go t.connectLoop(&wg)
+
 	go func() {
-		defer func() {
-			// t.Stop()
-			done <- true
-		}()
 		for {
-			t.scan()
-			if err != nil {
-				log.Fatal(err)
-			}
+			t.blink()
 			select {
 			case <-t.ctx.Done():
 				return
 			default:
+				time.Sleep(time.Millisecond * 500)
 			}
 		}
 	}()
-	<-done
-	close(done)
+
+	wg.Wait()
+
 	return nil
 }
 
-/*
-				found := false
-				for !found {
-					// scan
-					err := t.scan()
-					if err != nil {
-						log.Fatal(err)
-					}
-					select {
-					case <-t.ctx.Done():
-						return
-					default:
-					}
-
-					// discover
-					found, err = t.discover()
-					if err != nil {
-						log.Fatal(err)
-					}
-					select {
-					case <-t.ctx.Done():
-						return
-					default:
-					}
-				}
-				if found {
-					// notification
-					err = t.characteristic.EnableNotifications(t.notify)
-					if err != nil {
-						log.Fatal(err)
-					}
-
-					// running
-					for t.connected {
-						select {
-						case <-t.ctx.Done():
-							return
-						default:
-						}
-						t.blink()
-						time.Sleep(time.Millisecond * 500)
-					}
-				}
-			}
-		}()
-
-	<-done
-	close(done)
-	return nil
-}
-
-func (t *BLE) notify(buf []byte) {
-	log.Printf("Notify: %s\n", string(buf))
+func (t *BLE) notify(addr bluetooth.Address, buf []byte) {
+	log.Printf("[BLE] %s Notify: %s\n",
+		addr.String(),
+		string(buf),
+	)
 }
 
 func (t *BLE) blink() {
@@ -98,11 +54,20 @@ func (t *BLE) blink() {
 	} else {
 		buf = []byte{0x00}
 	}
-	_, err := t.characteristic.WriteWithoutResponse(buf)
-	if err != nil {
-		log.Printf("[BLE] Error Write: %v", err)
+
+	for _, d := range t.devices.DevicesReady() {
+		_, err := d.characteristic.WriteWithoutResponse(buf)
+		if err != nil {
+			log.Printf("[BLE] %s Error Write: %v",
+				d.address.String(),
+				err,
+			)
+		}
+		log.Printf("[BLE] %s Write: %0X",
+			d.address.String(),
+			buf,
+		)
 	}
-	log.Printf("[BLE] Write: %0X", buf)
+
 	t.ledStatus = !t.ledStatus
 }
-*/

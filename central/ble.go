@@ -2,19 +2,19 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"tinygo.org/x/bluetooth"
 )
 
 type BLE struct {
-	adapter     *bluetooth.Adapter
-	targets     BLETargets
-	connections []*BLEConnections
-	ledStatus   bool
-	ctx         context.Context
+	adapter   *bluetooth.Adapter
+	targets   BLETargets
+	devices   *BLEDevices
+	ledStatus bool
+	ctx       context.Context
 }
 
 type BLETargets struct {
@@ -23,19 +23,12 @@ type BLETargets struct {
 	Characteristic bluetooth.UUID
 }
 
-type BLEConnections struct {
-	deviceAddress  *bluetooth.Address
-	device         *bluetooth.Device
-	characteristic bluetooth.DeviceCharacteristic
-	connected      bool
-	updateTime     time.Time
-}
-
 func NewBLE() (t *BLE) {
 	t = new(BLE)
 	t.adapter = bluetooth.DefaultAdapter
 	t.adapter.SetConnectHandler(t.connectHandler)
 	t.targets = BLETargets{}
+	t.devices = NewBLEDevices()
 	t.ledStatus = false
 	return t
 }
@@ -62,147 +55,131 @@ func (t *BLE) SetTargetUUIDCharacteristic(s string) (err error) {
 	return nil
 }
 
-func (t *BLE) connectionShow() {
-	for _, c := range t.connections {
-		connected := "disconnected"
-		if c.connected {
-			connected = "connected"
-		}
-		fmt.Printf("[BLE]  Cstat %s %s %s\n",
-			c.deviceAddress.String(),
-			connected,
-			time.Since(c.updateTime).String(),
-		)
-	}
-}
-
-func (t *BLE) connectionConnect(addr bluetooth.Address) {
-	t.connections = append(t.connections, &BLEConnections{
-		deviceAddress: &addr,
-		updateTime:    time.Now(),
-		connected:     true,
-	})
-	t.connectionShow()
-}
-
-func (t *BLE) connectionDisconnect(addr bluetooth.Address) {
-	for _, c := range t.connections {
-		if *c.deviceAddress == addr {
-			c.updateTime = time.Now()
-			c.connected = false
-		}
-		log.Printf("[BLE]  Cdisconnect %s %s",
-			c.deviceAddress.String(),
-			time.Since(c.updateTime).String(),
-		)
-	}
-	t.connectionShow()
-}
-
-func (t *BLE) connectionCleanup() {
-	for {
-		select {
-		case <-t.ctx.Done():
-			return
-		default:
-		}
-
-		fmt.Print("+")
-
-		ncs := []*BLEConnections{}
-		for _, c := range t.connections {
-			if !c.connected {
-				// 切断から10秒していたらエントリ削除
-				if time.Since(c.updateTime).Seconds() > 10 {
-					log.Printf("[BLE] Cremove: %s", c.deviceAddress.String())
-					continue
-				}
-			}
-			ncs = append(ncs, c)
-		}
-		t.connections = ncs
-
-		time.Sleep(time.Second * 1)
-	}
-}
-
 func (t *BLE) connectHandler(addr bluetooth.Address, connected bool) {
 	if connected {
-		log.Printf("[BLE] CONNECTED %s", addr.String())
-		t.connectionConnect(addr)
+		log.Printf("[BLE] %s CONNECTED", addr.String())
+		t.devices.Connected(addr)
 	} else {
-		log.Printf("[BLE] DISCONNECTED %s", addr.String())
-		t.connectionDisconnect(addr)
+		log.Printf("[BLE] %s DISCONNECTED", addr.String())
+		t.devices.Disconnected(addr)
 		//		t.Stop()
 	}
 }
 
-func (t *BLE) scan() {
-	done := make(chan bool, 1)
+func (t *BLE) scanStart() {
+	log.Print("[BLE] start scan")
 	err := t.adapter.Scan(func(adapter *bluetooth.Adapter, device bluetooth.ScanResult) {
 		select {
 		case <-t.ctx.Done():
 			adapter.StopScan()
-			log.Print("SCAN STOP")
-			done <- true
+			log.Print("[BLE] stop scan")
 			return
 		default:
 		}
-		fmt.Print(".")
-
-		/*
-			log.Printf("[BLE]   %s %ddB %s",
-				device.Address.String(),
-				device.RSSI,
-				device.LocalName(),
-			)
-		*/
-
 		if (device.LocalName() == t.targets.LocalName) && (device.RSSI != 0) {
-			fmt.Print("!")
-
-			exists := false
-			for _, act := range t.connections {
-				if *act.deviceAddress == device.Address {
-					exists = true
-				}
-			}
-			fmt.Print("1")
-			if !exists {
-				fmt.Print("#")
-				fmt.Println()
-				log.Printf("[BLE] %s %ddB %s",
-					device.Address.String(),
-					device.RSSI,
-					device.LocalName(),
-				)
-				t.connect(&device.Address)
-			}
+			t.devices.Update(device.Address, device.RSSI)
 		}
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	<-done
 }
-func (t *BLE) connect(deviceAddress *bluetooth.Address) {
-	log.Printf("[BLE] CONNECTING: %s", deviceAddress.String())
 
+func (t *BLE) connectLoop(wg *sync.WaitGroup) {
+	for {
+		time.Sleep(time.Second * 1)
+		select {
+		case <-t.ctx.Done():
+			t.devices.DisconnectAll()
+			wg.Done()
+			return
+		default:
+		}
+		t.devices.Cleanup()
+		t.connect()
+		t.discover()
+		t.devices.Show()
+	}
+}
+
+func (t *BLE) connect() {
+	d := t.devices.Connecting()
+	if d == nil {
+		return
+	}
+
+	var err error
 	// connect
-	device, err := t.adapter.Connect(
-		*deviceAddress,
+	d.device, err = t.adapter.Connect(
+		d.address,
 		bluetooth.ConnectionParams{
 			ConnectionTimeout: bluetooth.NewDuration(time.Second * 5),
 		},
 	)
 	if err != nil {
-		t.connectionDisconnect(*deviceAddress)
-		log.Println(err)
+		log.Printf("[BLE] %s ERR [Connect] %s",
+			d.address.String(),
+			err,
+		)
+		t.devices.Disconnected(d.address)
+		time.Sleep(time.Second * 1)
+		return
+	}
+}
+
+func (t *BLE) discover() {
+	d := t.devices.Discovering()
+	if d == nil {
 		return
 	}
 
-	_ = device
+	srvcs, err := d.device.DiscoverServices(nil)
+	if err != nil {
+		log.Printf("[BLE] %s ERR DiscoverServices %s",
+			d.address.String(),
+			err,
+		)
+		d.device.Disconnect()
+		t.devices.Disconnected(d.address)
+		time.Sleep(time.Second * 1)
+		return
+	}
 
+	for _, srvc := range srvcs {
+		log.Printf("[BLE] %s - service %s",
+			d.address.String(),
+			srvc.UUID().String(),
+		)
+		if srvc.UUID() == t.targets.Service {
+			chars, err := srvc.DiscoverCharacteristics(nil)
+			if err != nil {
+				log.Printf("[BLE] %s ERR DiscoverCharacteristics %s",
+					d.address.String(),
+					err,
+				)
+				d.device.Disconnect()
+				t.devices.Disconnected(d.address)
+				time.Sleep(time.Second * 1)
+				return
+			}
+
+			for _, char := range chars {
+				log.Printf("[BLE] %s -- characteristic %s",
+					d.address.String(),
+					char.UUID().String(),
+				)
+				if char.UUID() == t.targets.Characteristic {
+					d.characteristic = &char
+					// notify
+					d.characteristic.EnableNotifications(func(buf []byte) {
+						t.notify(d.address, buf)
+					})
+					t.devices.Ready(d.address)
+					return
+				}
+			}
+		}
+	}
 }
 
 /*
