@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"sync"
 	"time"
 
 	"tinygo.org/x/bluetooth"
@@ -85,35 +84,14 @@ func (t *BLE) scanStart() {
 	}
 }
 
-func (t *BLE) connectLoop(wg *sync.WaitGroup) {
-	for {
-		time.Sleep(time.Second * 1)
-		select {
-		case <-t.ctx.Done():
-			t.devices.DisconnectAll()
-			wg.Done()
-			return
-		default:
-		}
-		t.devices.Cleanup()
-		t.connect()
-		t.discover()
-		t.devices.Show()
-	}
-}
-
-func (t *BLE) connect() {
-	d := t.devices.Connecting()
-	if d == nil {
-		return
-	}
-
+func (t *BLE) connect(d *BLEDevice) {
 	var err error
+	d.connectOk = false
 	// connect
 	d.device, err = t.adapter.Connect(
 		d.address,
 		bluetooth.ConnectionParams{
-			ConnectionTimeout: bluetooth.NewDuration(time.Second * 5),
+			//				ConnectionTimeout: bluetooth.NewDuration(time.Second * 1),
 		},
 	)
 	if err != nil {
@@ -125,21 +103,15 @@ func (t *BLE) connect() {
 		time.Sleep(time.Second * 1)
 		return
 	}
-}
+	d.connectOk = true
 
-func (t *BLE) discover() {
-	d := t.devices.Discovering()
-	if d == nil {
-		return
-	}
-
+	// discover
 	srvcs, err := d.device.DiscoverServices(nil)
 	if err != nil {
 		log.Printf("[BLE] %s ERR DiscoverServices %s",
 			d.address.String(),
 			err,
 		)
-		d.device.Disconnect()
 		t.devices.Disconnected(d.address)
 		time.Sleep(time.Second * 1)
 		return
@@ -157,7 +129,6 @@ func (t *BLE) discover() {
 					d.address.String(),
 					err,
 				)
-				d.device.Disconnect()
 				t.devices.Disconnected(d.address)
 				time.Sleep(time.Second * 1)
 				return
@@ -181,61 +152,3 @@ func (t *BLE) discover() {
 		}
 	}
 }
-
-/*
-func (t *BLE) discover() (found bool, err error) {
-	log.Println("[BLE] connecting")
-
-	// connect
-	t.device, err = t.adapter.Connect(
-		*t.deviceAddress,
-		bluetooth.ConnectionParams{},
-	)
-	if err != nil {
-		log.Println(err)
-		return false, err
-	}
-
-	select {
-	case <-t.ctx.Done():
-		return false, nil
-	default:
-	}
-
-	// discover
-	log.Println("[BLE] discovering services/characteristics")
-
-	srvcs, err := t.device.DiscoverServices(nil)
-	if err != nil {
-		return false, err
-	}
-
-	for _, srvc := range srvcs {
-		log.Println("[BLE] - service", srvc.UUID().String())
-		if srvc.UUID() == t.targets.Service {
-			chars, err := srvc.DiscoverCharacteristics(nil)
-			if err != nil {
-				return false, err
-			}
-			for _, char := range chars {
-				log.Println("[BLE] -- characteristic", char.UUID().String())
-				if char.UUID() == t.targets.Characteristic {
-					t.characteristic = char
-					return true, nil
-				}
-			}
-		}
-	}
-	return false, nil
-}
-
-func (t *BLE) Stop() {
-	log.Println("[BLE] stop")
-	if t.connected {
-		t.connected = false
-		t.characteristic.EnableNotifications(nil)
-		t.device.Disconnect()
-		log.Println("[BLE] disconnect")
-	}
-}
-*/

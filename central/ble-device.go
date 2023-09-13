@@ -26,6 +26,7 @@ type BLEDevice struct {
 	characteristic *bluetooth.DeviceCharacteristic
 	rssi           int16
 	state          int
+	connectOk      bool
 	updateTime     time.Time
 }
 
@@ -59,6 +60,7 @@ func (t *BLEDevices) Connecting() *BLEDevice {
 			d.state = BLEDeviceStateConnecting
 			d.device = nil
 			d.characteristic = nil
+			d.connectOk = false
 			d.updateTime = time.Now()
 			log.Printf("[BLEDevices] %s connecting", d.address.String())
 			return d
@@ -98,11 +100,12 @@ func (t *BLEDevices) Disconnected(addr bluetooth.Address) {
 	if d.state == BLEDeviceStateReady {
 		d.characteristic.EnableNotifications(nil)
 	}
-	if d.state > 2 {
+	if d.connectOk {
 		d.device.Disconnect()
 	}
 	d.state = BLEDeviceStateDisconnected
 	d.updateTime = time.Now()
+	d.connectOk = false
 	log.Printf("[BLEDevices] %s disconnected", addr.String())
 }
 
@@ -144,9 +147,9 @@ func (t *BLEDevices) DisconnectAll() {
 func (t *BLEDevices) Cleanup() {
 	nd := []*BLEDevice{}
 	for _, d := range t.devices {
-		// 切断されて10秒たったデバイス
+		// 切断されて5秒たったデバイス
 		if d.state == BLEDeviceStateDisconnected {
-			if time.Since(d.updateTime).Seconds() > 10 {
+			if time.Since(d.updateTime).Seconds() > 5 {
 				log.Printf("[BLEDevices] %s remove", d.address.String())
 				continue
 			}

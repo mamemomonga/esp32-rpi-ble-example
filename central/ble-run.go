@@ -20,21 +20,51 @@ func (t *BLE) Run(ctx context.Context) (err error) {
 
 	go t.scanStart()
 
-	wg.Add(1)
-	go t.connectLoop(&wg)
-
 	go func() {
 		for {
-			t.blink()
+			time.Sleep(time.Second * 1)
 			select {
 			case <-t.ctx.Done():
 				return
 			default:
-				time.Sleep(time.Millisecond * 500)
 			}
+
+			d := t.devices.Connecting()
+			if d == nil {
+				continue
+			}
+			go t.connect(d)
+		}
+	}()
+	go func() {
+		for {
+			time.Sleep(time.Second * 1)
+			select {
+			case <-t.ctx.Done():
+				return
+			default:
+			}
+			t.devices.Cleanup()
+		}
+	}()
+	go func() {
+		for {
+			time.Sleep(time.Millisecond * 500)
+			select {
+			case <-t.ctx.Done():
+				return
+			default:
+			}
+			t.blink()
 		}
 	}()
 
+	wg.Add(1)
+	go func() {
+		<-t.ctx.Done()
+		t.devices.DisconnectAll()
+		wg.Done()
+	}()
 	wg.Wait()
 
 	return nil
