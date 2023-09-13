@@ -4,7 +4,7 @@
 * ベリフェラルのLocalNameとServiceUUID, CharacteristicUUIDでマッチする。
 * ベリフェラル側のボタンを押すとカウントアップされ、セントラル側にNotifyで数値が通知される。
 * セントラル側はWriteでベリフェラル側に数値が送られる。0x00でなければLEDが点灯する。
-* 同一設定の複数のベリフェラルは試していない。
+* 同一設定の複数のベリフェラルに対応。(二台でテスト)
 
 ![photo](./resource/photo.jpg)
 
@@ -16,7 +16,7 @@
 
 * [ESP32-C3(RISC-V)](https://akizukidenshi.com/catalog/g/gM-17493/)を使った自作モジュール
 * Arduino(C++),Arduino-CLI
-* [Seeed Studio XIAO ESP32C3](https://akizukidenshi.com/catalog/g/gM-17454/)でもほとんど変更なく動作すると思う(未確認)
+* [Seeed Studio XIAO ESP32C3](https://akizukidenshi.com/catalog/g/gM-17454/)はピンアサインを変更すれば利用可能。
 
 回路図
 
